@@ -1,95 +1,89 @@
-name: Build Aegis Nexus APK
+
+name: Build APK
 
 on:
-  workflow_dispatch:
   push:
-    branches: [main, master]
-
-permissions:
-  contents: read
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Baixar codigo
+      - name: Baixar repositorio
         uses: actions/checkout@v4
 
-      - name: Configurar Java 17
+      - name: Configurar Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Configurar Gradle 8.9
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Preparar Android SDK
-        shell: bash
-        run: |
-          set -e
-          echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          echo "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          echo "${ANDROID_HOME:-/usr/local/lib/android/sdk}/platform-tools" >> "$GITHUB_PATH"
-
-      - name: Aceitar licencas e instalar componentes Android
-        shell: bash
-        run: |
-          set -e
-          SDKMANAGER="${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager"
-
-          if [ ! -x "$SDKMANAGER" ]; then
-            echo "ERRO: sdkmanager nao encontrado em $SDKMANAGER"
-            find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools" -name sdkmanager -type f
-            exit 1
-          fi
-
-          "$SDKMANAGER" --version
-          yes | "$SDKMANAGER" --licenses || true
-          "$SDKMANAGER" --install \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
-
-      - name: Encontrar e extrair projeto
+      - name: Localizar e extrair projeto
         shell: bash
         run: |
           set -e
 
-          ZIP_FILE="$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)"
+          ZIP_FILE=$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type f -name '*.zip' | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERRO: nenhum ZIP encontrado na raiz do repositorio."
+            echo "ERRO: Nenhum arquivo ZIP encontrado na raiz do repositorio."
             exit 1
           fi
 
-          mkdir -p extracted
-          unzip -o -q "$ZIP_FILE" -d extracted
+          mkdir -p "$GITHUB_WORKSPACE/extracted"
+          unzip -o "$ZIP_FILE" -d "$GITHUB_WORKSPACE/extracted"
 
-          PROJECT_DIR="$(find extracted -type f -name settings.gradle.kts -print -quit | xargs -r dirname)"
+          SETTINGS_FILE=$(find "$GITHUB_WORKSPACE/extracted" -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) | head -n 1)
 
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERRO: settings.gradle.kts nao encontrado dentro do ZIP."
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "ERRO: settings.gradle ou settings.gradle.kts nao encontrado."
             exit 1
           fi
 
+          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
           echo "Projeto encontrado em: $PROJECT_DIR"
+          ls -la "$PROJECT_DIR"
+
+      - name: Corrigir singleLine no Kotlin
+        shell: bash
+        run: |
+          set -e
+
+          FILE="$PROJECT_DIR/app/src/main/java/com/aegisnexus/app/MainActivity.kt"
+
+          if [ ! -f "$FILE" ]; then
+            echo "ERRO: MainActivity.kt nao encontrado."
+            exit 1
+          fi
+
+          sed -i 's/^[[:space:]]*singleLine = true[[:space:]]*$/            setSingleLine(true)/' "$FILE"
+
+          if grep -q '^[[:space:]]*singleLine = true[[:space:]]*$' "$FILE"; then
+            echo "ERRO: A linha singleLine ainda nao foi corrigida."
+            exit 1
+          fi
+
+          grep -n 'setSingleLine(true)' "$FILE"
 
       - name: Compilar APK
         shell: bash
         run: |
           set -e
           cd "$PROJECT_DIR"
-          gradle assembleDebug --no-daemon --stacktrace
+          gradle assembleDebug --no-daemon
 
-      - name: Disponibilizar APK
+      - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
           name: Aegis-Nexus-debug-apk
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-          retention-days: 14
+          
