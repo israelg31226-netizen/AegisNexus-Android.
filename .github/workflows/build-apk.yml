@@ -1,10 +1,11 @@
-
 name: Build Aegis Nexus APK
 
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
+    branches:
+      - main
+      - master
 
 permissions:
   contents: read
@@ -30,37 +31,51 @@ jobs:
 
       - name: Configurar Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          cmdline-tools-version: 11076708
+          packages: 'platform-tools,platforms;android-35,build-tools;35.0.0'
 
-      - name: Extrair o projeto
+      - name: Aceitar licencas do Android
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Localizar e extrair projeto
         shell: bash
         run: |
           ZIP_FILE="$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)"
+
           if [ -z "$ZIP_FILE" ]; then
-            echo "Nenhum ZIP encontrado na raiz do repositorio."
+            echo "ERRO: Nenhum arquivo ZIP encontrado na raiz do repositorio."
             exit 1
           fi
+
+          echo "Arquivo encontrado: $ZIP_FILE"
+
           mkdir -p extracted
           unzip -o -q "$ZIP_FILE" -d extracted
+
           PROJECT_DIR="$(find extracted -type f -name settings.gradle.kts -print -quit | xargs -r dirname)"
+
           if [ -z "$PROJECT_DIR" ]; then
-            echo "Nao encontrei settings.gradle.kts dentro do ZIP."
+            echo "ERRO: settings.gradle.kts nao foi encontrado dentro do ZIP."
             exit 1
           fi
+
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
           echo "Projeto localizado em: $PROJECT_DIR"
 
       - name: Compilar APK
+        shell: bash
         run: |
-          yes | sdkmanager --licenses || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
           cd "$PROJECT_DIR"
           gradle assembleDebug --no-daemon
 
-      - name: Disponibilizar APK
+      - name: Disponibilizar APK para baixar
         uses: actions/upload-artifact@v4
         with:
           name: Aegis-Nexus-debug-apk
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
-          
