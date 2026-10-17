@@ -23,6 +23,15 @@ jobs:
 
       - name: Configurar Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Instalar componentes Android
+        shell: bash
+        run: |
+          set -e
+          yes | sdkmanager --licenses
+          sdkmanager "platform-tools"
 
       - name: Localizar e extrair projeto
         shell: bash
@@ -42,7 +51,7 @@ jobs:
           SETTINGS_FILE=$(find "$GITHUB_WORKSPACE/extracted" -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) | head -n 1)
 
           if [ -z "$SETTINGS_FILE" ]; then
-            echo "ERRO: settings.gradle ou settings.gradle.kts nao encontrado."
+            echo "ERRO: Arquivo settings.gradle nao encontrado."
             exit 1
           fi
 
