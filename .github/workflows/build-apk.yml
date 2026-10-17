@@ -3,9 +3,7 @@ name: Build Aegis Nexus APK
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
-      - master
+    branches: [main, master]
 
 permissions:
   contents: read
@@ -15,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Baixar arquivos do repositorio
+      - name: Baixar codigo
         uses: actions/checkout@v4
 
       - name: Configurar Java 17
@@ -24,34 +22,49 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Configurar Gradle
+      - name: Configurar Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Configurar Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          cmdline-tools-version: 11076708
-          packages: 'platform-tools,platforms;android-35,build-tools;35.0.0'
-
-      - name: Aceitar licencas do Android
+      - name: Preparar Android SDK
         shell: bash
         run: |
-          yes | sdkmanager --licenses || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          set -e
+          echo "ANDROID_HOME=${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "${ANDROID_HOME:-/usr/local/lib/android/sdk}/platform-tools" >> "$GITHUB_PATH"
 
-      - name: Localizar e extrair projeto
+      - name: Aceitar licencas e instalar componentes Android
         shell: bash
         run: |
-          ZIP_FILE="$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)"
+          set -e
+          SDKMANAGER="${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools/latest/bin/sdkmanager"
 
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ERRO: Nenhum arquivo ZIP encontrado na raiz do repositorio."
+          if [ ! -x "$SDKMANAGER" ]; then
+            echo "ERRO: sdkmanager nao encontrado em $SDKMANAGER"
+            find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/cmdline-tools" -name sdkmanager -type f
             exit 1
           fi
 
-          echo "Arquivo encontrado: $ZIP_FILE"
+          "$SDKMANAGER" --version
+          yes | "$SDKMANAGER" --licenses || true
+          "$SDKMANAGER" --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Encontrar e extrair projeto
+        shell: bash
+        run: |
+          set -e
+
+          ZIP_FILE="$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)"
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERRO: nenhum ZIP encontrado na raiz do repositorio."
+            exit 1
+          fi
 
           mkdir -p extracted
           unzip -o -q "$ZIP_FILE" -d extracted
@@ -59,20 +72,21 @@ jobs:
           PROJECT_DIR="$(find extracted -type f -name settings.gradle.kts -print -quit | xargs -r dirname)"
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "ERRO: settings.gradle.kts nao foi encontrado dentro do ZIP."
+            echo "ERRO: settings.gradle.kts nao encontrado dentro do ZIP."
             exit 1
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Projeto localizado em: $PROJECT_DIR"
+          echo "Projeto encontrado em: $PROJECT_DIR"
 
       - name: Compilar APK
         shell: bash
         run: |
+          set -e
           cd "$PROJECT_DIR"
-          gradle assembleDebug --no-daemon
+          gradle assembleDebug --no-daemon --stacktrace
 
-      - name: Disponibilizar APK para baixar
+      - name: Disponibilizar APK
         uses: actions/upload-artifact@v4
         with:
           name: Aegis-Nexus-debug-apk
